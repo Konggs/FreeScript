@@ -1,4 +1,6 @@
 local SaveManager = {} do
+    SaveManager.ConfigName = "Config"
+    SaveManager.Ignore = {}
 
     SaveManager.Parser = {
         Toggle = {
