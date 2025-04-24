@@ -199,11 +199,16 @@ local SaveManager = {} do
         -- auto-load default
         self:LoadAutoloadConfig()
 
-        -- hook mỗi option: khi nào OnChanged được gọi thì Save
+        -- hook mỗi option: khi nào OnChanged được gọi thì Save + debug
         for _, opt in pairs(self.Options) do
             if type(opt.OnChanged) == "function" then
                 opt:OnChanged(function()
-                    self:Save(DEFAULT_CONFIG)
+                    local ok, err = self:Save(DEFAULT_CONFIG)
+                    if ok then
+                        print(("[SaveManager] Auto-saved config '%s'"):format(DEFAULT_CONFIG))
+                    else
+                        warn(("[SaveManager] Failed to auto-save '%s': %s"):format(DEFAULT_CONFIG, err))
+                    end
                 end)
             end
         end
