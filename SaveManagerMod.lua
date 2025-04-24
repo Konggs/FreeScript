@@ -1,6 +1,3 @@
-
-local HttpService = game:GetService("HttpService")
-
 local SaveManager = {} do
     SaveManager.ConfigName = "Config"
     SaveManager.Folder = "FluentSettings"
@@ -120,7 +117,7 @@ local SaveManager = {} do
             end
             table.insert(data.objects, self.Parser[opt.Type].Save(idx, opt))
         end
-        local ok, encoded = pcall(HttpService.JSONEncode, HttpService, data)
+        local ok, encoded = pcall(game:GetService("HttpService").JSONEncode, game:GetService("HttpService"), data)
         if not ok then
             return false, "failed to encode data"
         end
@@ -133,7 +130,7 @@ local SaveManager = {} do
         if not isfile(fullPath) then
             return false, "config file not found"
         end
-        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, readfile(fullPath))
+        local ok, decoded = pcall(game:GetService("HttpService").JSONDecode, game:GetService("HttpService"), readfile(fullPath))
         if not ok then
             return false, "failed to decode data"
         end
@@ -156,26 +153,15 @@ local SaveManager = {} do
 
         local fullPath = ("%s/%s.json"):format(self.Folder, self.ConfigName)
         if isfile(fullPath) then
-            local ok, err = self:Load()
-            if not ok then
-                warn(("[SaveManager] Load error: %s"):format(err))
-            end
+            self:Load()
         else
-            local ok, err = self:Save()
-            if not ok then
-                warn(("[SaveManager] Initial save error: %s"):format(err))
-            end
+            self:Save()
         end
 
         for _, opt in pairs(self.Options) do
             if type(opt.OnChanged) == "function" then
                 opt:OnChanged(function()
-                    local ok, err = self:Save()
-                    if ok then
-                        print(("[SaveManager] Auto-saved '%s.json'"):format(self.ConfigName))
-                    else
-                        warn(("[SaveManager] Failed to auto-save '%s.json': %s"):format(self.ConfigName, err))
-                    end
+                    self:Save()
                 end)
             end
         end
