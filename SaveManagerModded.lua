@@ -1,3 +1,6 @@
+-- SaveManagerModded.lua
+-- Bản modded để auto-save về "default.json" và debug-print
+
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
