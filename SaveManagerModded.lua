@@ -1,5 +1,6 @@
 local SaveManager = {} do
     SaveManager.ConfigName = "Config"
+    SaveManager.Folder = "FluentSettings"
     SaveManager.Ignore = {}
 
     SaveManager.Parser = {
