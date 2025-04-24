@@ -1,17 +1,17 @@
 -- SaveManagerModded.lua
--- Bản modded để auto-save về "default.json" và debug-print
+-- Single-file config ("Config.json" by default) saved directly under the specified folder
 
 local HttpService = game:GetService("HttpService")
 
 local SaveManager = {} do
-    -- TÊN CONFIG MẶC ĐỊNH
-    local DEFAULT_CONFIG = "default"
-
-    -- Thư mục gốc
+    -- Default config file name (without ".json")
+    SaveManager.ConfigName = "Config"
+    -- Default save folder (override with :SetFolder)
     SaveManager.Folder = "FluentSettings"
+    -- Keys to ignore when saving
     SaveManager.Ignore = {}
 
-    -- Parser cho từng loại UI element
+    -- Parsers for each UI element type
     SaveManager.Parser = {
         Toggle = {
             Save = function(idx, object)
@@ -35,7 +35,7 @@ local SaveManager = {} do
         },
         Dropdown = {
             Save = function(idx, object)
-                return { type = "Dropdown", idx = idx, value = object.Value, mutli = object.Multi }
+                return { type = "Dropdown", idx = idx, value = object.Value, multi = object.Multi }
             end,
             Load = function(idx, data)
                 if SaveManager.Options[idx] then
@@ -83,166 +83,119 @@ local SaveManager = {} do
         },
     }
 
-    -- Đánh dấu các index không cần save
+    -- Override the config file name
+    function SaveManager:SetConfigName(name)
+        assert(type(name) == "string" and #name > 0, "ConfigName must be a non-empty string")
+        self.ConfigName = name
+    end
+
+    -- Mark certain option keys to ignore when saving
     function SaveManager:SetIgnoreIndexes(list)
         for _, key in next, list do
             self.Ignore[key] = true
         end
     end
 
-    -- Thay đổi folder gốc
+    -- Override the base folder where the .json will be saved
     function SaveManager:SetFolder(folder)
+        assert(type(folder) == "string" and #folder > 0, "Folder must be a non-empty string")
         self.Folder = folder
         self:BuildFolderTree()
     end
 
-    -- Save thủ công
-    function SaveManager:Save(name)
-        if not name then
-            return false, "no config file is selected"
+    -- Create each segment of the folder path if it doesn't exist
+    function SaveManager:BuildFolderTree()
+        local segments = {}
+        for seg in self.Folder:gmatch("[^/\\]+") do
+            table.insert(segments, seg)
         end
+        local path = ""
+        for _, seg in ipairs(segments) do
+            path = (path == "" and seg) or (path .. "/" .. seg)
+            if not isfolder(path) then
+                makefolder(path)
+            end
+        end
+    end
 
-        local fullPath = self.Folder .. "/settings/" .. name .. ".json"
+    -- Save current options into "<Folder>/<ConfigName>.json"
+    function SaveManager:Save()
+        local fullPath = ("%s/%s.json"):format(self.Folder, self.ConfigName)
         local data = { objects = {} }
-
-        for idx, option in next, self.Options do
-            if not self.Parser[option.Type] then continue end
-            if self.Ignore[idx] then continue end
-            table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
+        for idx, opt in next, self.Options do
+            if not self.Parser[opt.Type] then
+                continue
+            end
+            if self.Ignore[idx] then
+                continue
+            end
+            table.insert(data.objects, self.Parser[opt.Type].Save(idx, opt))
         end
-
         local ok, encoded = pcall(HttpService.JSONEncode, HttpService, data)
         if not ok then
             return false, "failed to encode data"
         end
-
         writefile(fullPath, encoded)
         return true
     end
 
-    -- Load thủ công
-    function SaveManager:Load(name)
-        if not name then
-            return false, "no config file is selected"
+    -- Load options from "<Folder>/<ConfigName>.json"
+    function SaveManager:Load()
+        local fullPath = ("%s/%s.json"):format(self.Folder, self.ConfigName)
+        if not isfile(fullPath) then
+            return false, "config file not found"
         end
-
-        local file = self.Folder .. "/settings/" .. name .. ".json"
-        if not isfile(file) then
-            return false, "invalid file"
-        end
-
-        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, readfile(file))
+        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, readfile(fullPath))
         if not ok then
-            return false, "decode error"
+            return false, "failed to decode data"
         end
-
-        for _, option in next, decoded.objects do
-            if self.Parser[option.type] then
+        for _, obj in next, decoded.objects do
+            local parser = self.Parser[obj.type]
+            if parser then
                 task.spawn(function()
-                    self.Parser[option.type].Load(option.idx, option)
+                    parser.Load(obj.idx, obj)
                 end)
             end
         end
-
         return true
     end
 
-    -- Bỏ save các theme-setting
-    function SaveManager:IgnoreThemeSettings()
-        self:SetIgnoreIndexes({
-            "InterfaceTheme", "AcrylicToggle", "TransparentToggle", "MenuKeybind"
-        })
-    end
-
-    -- Tạo thư mục nếu chưa có
-    function SaveManager:BuildFolderTree()
-        local paths = {
-            self.Folder,
-            self.Folder .. "/settings"
-        }
-        for _, p in ipairs(paths) do
-            if not isfolder(p) then
-                makefolder(p)
-            end
-        end
-    end
-
-    -- Lấy danh sách file configs
-    function SaveManager:RefreshConfigList()
-        local list = listfiles(self.Folder .. "/settings")
-        local out = {}
-        for _, file in ipairs(list) do
-            if file:sub(-5) == ".json" then
-                local base = file:match("([^/\\]+)%.json$")
-                if base and base ~= "options" then
-                    table.insert(out, base)
-                end
-            end
-        end
-        return out
-    end
-
-    -- Thiết lập thư viện, khởi tạo auto-load và auto-save
+    -- Bind to Fluent, auto-load or auto-init, and hook auto-save with debug logs
     function SaveManager:SetLibrary(library)
         self.Library = library
         self.Options = library.Options
 
-        -- đảm bảo folder
+        -- Ensure folder exists
         self:BuildFolderTree()
 
-        -- tạo default.json nếu chưa có
-        local defaultPath = self.Folder .. "/settings/" .. DEFAULT_CONFIG .. ".json"
-        if not isfile(defaultPath) then
-            self:Save(DEFAULT_CONFIG)
+        -- If config exists, load it; otherwise create an initial one
+        local fullPath = ("%s/%s.json"):format(self.Folder, self.ConfigName)
+        if isfile(fullPath) then
+            local ok, err = self:Load()
+            if not ok then
+                warn(("[SaveManager] Load error: %s"):format(err))
+            end
+        else
+            local ok, err = self:Save()
+            if not ok then
+                warn(("[SaveManager] Initial save error: %s"):format(err))
+            end
         end
 
-        -- ghi autoload.txt về default
-        writefile(self.Folder .. "/settings/autoload.txt", DEFAULT_CONFIG)
-
-        -- auto-load default
-        self:LoadAutoloadConfig()
-
-        -- hook mỗi option: khi nào OnChanged được gọi thì Save + debug
+        -- Hook every option's OnChanged to auto-save
         for _, opt in pairs(self.Options) do
             if type(opt.OnChanged) == "function" then
                 opt:OnChanged(function()
-                    local ok, err = self:Save(DEFAULT_CONFIG)
+                    local ok, err = self:Save()
                     if ok then
-                        print(("[SaveManager] Auto-saved config '%s'"):format(DEFAULT_CONFIG))
+                        print(("[SaveManager] Auto-saved '%s.json'"):format(self.ConfigName))
                     else
-                        warn(("[SaveManager] Failed to auto-save '%s': %s"):format(DEFAULT_CONFIG, err))
+                        warn(("[SaveManager] Failed to auto-save '%s.json': %s"):format(self.ConfigName, err))
                     end
                 end)
             end
         end
     end
-
-    -- Load config được chỉ định trong autoload.txt
-    function SaveManager:LoadAutoloadConfig()
-        local txt = self.Folder .. "/settings/autoload.txt"
-        if isfile(txt) then
-            local name = readfile(txt)
-            local ok, err = self:Load(name)
-            if not ok then
-                self.Library:Notify({
-                    Title = "Interface",
-                    Content = "Config loader",
-                    SubContent = "Failed to load autoload config: " .. err,
-                    Duration = 7
-                })
-            else
-                self.Library:Notify({
-                    Title = "Interface",
-                    Content = "Config loader",
-                    SubContent = string.format("Auto-loaded config %q", name),
-                    Duration = 7
-                })
-            end
-        end
-    end
-
-    -- Lần đầu khởi tạo folder
-    SaveManager:BuildFolderTree()
 end
 
 return SaveManager
